@@ -3,7 +3,7 @@
 #  Author: Daniel Bustamante
 #    Date: 02 24 2020 
 #
-# Purpose: fit mediation model using mxregsem for - TEs, sMRI mediators, PTSDsxs. Full sample
+# Purpose: fit mediation model using mxregsem for a direct and indirect effects model (predictor, variables in the indirect path, outcome). Full sample
 #
 # ----------------------------------------------------------------------------------------------------------------------
 
