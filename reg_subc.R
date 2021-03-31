@@ -16,7 +16,7 @@ library(MASS)
 ## uncomment these two lines below if mxregem has not been installed --------- #
 # install.packages("devtools")
 # devtools::install_github("trbrick/mxregsem")
-# library(mxregsem)
+library(mxregsem)
 ## --------------------------------------------------------------------------- #
 
 source("miFunctions.R")
@@ -31,32 +31,41 @@ options(scipen = 999)
 # Create Output 
 filename    <- "reg_subc"
 
-# Load data
-nda201 <- readRDS("data.Rds")
+# Load/simulate data
+# simulate standardized normally distributed brain volume subcortical and cortical variables
+n <- 12000
+nNormVars <- 300
+sigma <- matrix(.6, nrow=nNormVars, ncol=nNormVars)
+diag(sigma) <- 1
+df <- data.frame(mvrnorm(n, rep(0, nNormVars), sigma))
 
+nSubcortVars <- .14*nNormVars ## use proportion of subcortical vars 
+nCortVars <- nNormVars-nSubcortVars
+
+colnames(df) <- paste0("subcort_", 1:nSubcortVars)
+colnames(df)[(nSubcortVars+1):length(df)] <- paste0("cort_", 1:nCortVars)
+
+# simulate continuous skewed variables
+mh1 <- scale(rnbinom(n, 17, .95), center = F)
+mh2 <- scale(rnbinom(n, 39, .9), center = F)
+mh <- data.frame(cbind(mh1, mh2))
+colnames(mh) <- c("mh1", "mh2")
+
+# if initiation/exposure has not happened in mh1, code as 0 on mh2 for that individual
+mh$mh2 <- ifelse(mh$mh1 == 0, mh$mh2 == 0, mh$mh2)
+
+# bind the two dataframes 
+dat <- data.frame(cbind(mh, df))
+nda201 <- dat
+
+# nda201 <- readRDS("data.Rds")
 
 dim(nda201)
 abcdNames<-names(nda201)
 abcdNames[1:10]
 
-## if variables' names have special characters, the change them, for example "." in the variables' names, for a "_" to avoid error while running models 
-colnames(nda201) <- gsub("\\.+","\\_", colnames(nda201)) ## find any punctuation or space character as pattern, "+" (the preeceding items can be matched) one or more times, with \\ to treat "_" as a regular character in the replacement, could also do "[[:punct:][:space:]]+" if punctuation signs are unknown
-
-# check some correlations
-someVars <- c("rsmri_vol_subcort_aseg_hippocampus_lh", "rsmri_vol_subcort_aseg_hippocampus_rh",
-              "rsmri_vol_subcort_aseg_amygdala_lh", "rsmri_vol_subcort_aseg_amygdala_rh",
-              "rsmri_vol_subcort_aseg_putamen_lh", "rsmri_vol_subcort_aseg_putamen_rh",
-              "rsmri_vol_subcort_aseg_caudate_lh", "rsmri_vol_subcort_aseg_caudate_rh")
-
-cor_vars_subc <- nda201[, c("rte", "rptsd_noTEna", 
-                            someVars
-)]
-
-round(cor(cor_vars_subc, use = "complete.obs"), 4)
-cor.test(nda201[,someVars[1]], nda201[,someVars[2]])
-
 # describe/check future mediation variables
-nda201sMRIdesc <- describe(nda201[, grep(c("rsmri_vol_subcort_aseg"), names(nda201), value = TRUE)])
+nda201sMRIdesc <- describe(nda201[, grep(c("subcort"), names(nda201), value = TRUE)])
 nda201sMRIdesc
 
 # if any variable is full of NAs (meeting any of the conditions below), then identify them
@@ -65,7 +74,7 @@ nopeMedVars <- rownames(nda201sMRIdesc[naMedVars[1:length(naMedVars)],])
 nopeMedVars
 
 ## select ROIs to include as mediators to be regularized (subcort, cort, etc)
-medVars <- grep(c("rsmri_vol_subcort_aseg"), names(nda201), value = TRUE) ## getting ROIs for analysis 
+medVars <- grep(c("subcort"), names(nda201), value = TRUE) ## getting ROIs for analysis 
 
 # select ROIs to include as mediators
 # remove variables not passing the conditions above
@@ -73,8 +82,8 @@ if (length(nopeMedVars) > 0) {medVars <- medVars[!grepl(paste0(nopeMedVars, coll
 medVars
 
 # select ROIs to include as mediators; and predictor and outcome
-predictor <- "rte"
-outcome <- "rptsd_noTEna"
+predictor <- "mh1"
+outcome <- "mh2"
 
 # data into analysis
 rmuse <- c(predictor, medVars, outcome)
@@ -135,11 +144,11 @@ varcovs <- list(preVar, medVar, outcVar)
 means <- mxPath(from = "one", to = c(manVars), free = TRUE, labels = paste("mean_", c(manVars), sep = ""))
 dataMed <- mxData(nda201, type="raw")
 funML <- mxFitFunctionML()
-# ci <- mxCI(c("med"))
+ci <- mxCI(c("med"))
 
 # build model including CIs
 modelMed <- mxModel(paste("med_model", modelDirection, sep = "_"), type = "RAM", manifestVars = manVars,
-                    paths, varcovs, means, dataMed, funML)#, ci)
+                    paths, varcovs, means, dataMed, funML, ci)
 
 
 # ---------------------------------------
