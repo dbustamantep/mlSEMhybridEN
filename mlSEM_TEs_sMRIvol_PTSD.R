@@ -16,42 +16,96 @@ rm(list=ls())
 
 library(OpenMx)
 library(psych)
+library(MASS)
 library(matrixStats)
 # library(car)
 # library(umx) ##
 source("miFunctions.R")
 #source("miTryHard.R")
-mxOption( NULL, "Default optimizer", "SLSQP" )
+mxOption( NULL, "Default optimizer", "CSOLNP" ) # optimizer options CSOLNP, NPSOL and SLSQP
 mxOption(NULL, 'Number of Threads', parallel::detectCores())
 options(width=280)
 options(max.print=999999)
 mxVersion()
-
 
 # Create Output 
 filename    <- "mlMed_TEs_sMRIvol_PTSD"
 sink(paste(filename,".Ro",sep=""), append=FALSE, split=TRUE)
 
 # load data
-nda18s <- readRDS("teMRIptsd_WholeBrain_Subcortical_data.Rds") 
+# simulate standardized normally distributed brain volume subcortical and cortical variables
+n <- 12000
+nNormVars <- 300
+sigma <- matrix(.6, nrow=nNormVars, ncol=nNormVars)
+diag(sigma) <- 1
+df <- data.frame(mvrnorm(n, rep(0, nNormVars), sigma))
+
+nSubcortVars <- .14*nNormVars ## use proportion of subcortical vars 
+nCortVars <- nNormVars-nSubcortVars
+
+colnames(df) <- paste0("subcort_", 1:nSubcortVars)
+colnames(df)[(nSubcortVars+1):length(df)] <- paste0("cort_", 1:nCortVars)
+
+# simulate continuous skewed variables
+mh1 <- scale(rnbinom(n, 17, .95), center = F)
+mh2 <- scale(rnbinom(n, 39, .9), center = F)
+mh <- data.frame(cbind(mh1, mh2))
+colnames(mh) <- c("mh1", "mh2")
+
+# if initiation/exposure has not happened in mh1, code as 0 on mh2 for that individual
+mh$mh2 <- ifelse(mh$mh1 == 0, mh$mh2 == 0, mh$mh2)
+
+# simulate the other ID, site, age, sex and other variables 
+nTwins <- 1600
+nMZs <- 800
+nDZs <- nTwins-nMZs
+nSiblings <- 502
+
+IID <- c(1:n)
+FID <- c(rep(1:(nTwins/2),2), rep((nTwins+1):((nTwins+1)+nSiblings), 2), (nTwins+1)+(nSiblings+1):(n-((nTwins+1)+(nSiblings+1)))) ## family ID
+
+relp <- c(rep(1, nMZs/2), rep(.5, nDZs/2), rep(1, nMZs/2), rep(.5, nDZs/2)) ## MZs and DZs alternating
+relp <- c(relp, rep(NA, n-nTwins))
+srelp <- c(rep(1, nMZs/2), rep(.707, nDZs/2), rep(1, nMZs/2), rep(.707, nDZs/2)) ## MZs and DZs alternating
+srelp <- c(srelp, rep(NA, n-nTwins))
+srelq <- srelp
+
+sibSites <- sample(5:21, (nSiblings/2), replace = TRUE) 
+site <- c(rep(1:4, (nTwins/4)), rep(sibSites, 2), sample(1:21, n-(nTwins+nSiblings), replace = TRUE)) ## 4 of the sites for twins only, random sites for siblings, and for unrelated participants
+ageRange <- 108:131 # in months
+ageTwins <- sample(ageRange, nTwins/2, replace = TRUE)
+ageTwins <- rep(ageTwins, 2)
+age <- c(ageTwins, sample(ageRange, n-nTwins, replace = TRUE))
+sexTwins <- sample(c(1,2), nTwins/2, replace = TRUE) # same-sex twins
+sexTwins <- rep(sexTwins, 2)
+sex <- c(sexTwins, sample(1:2, n-nTwins, replace = TRUE))
+# Proportions of race/ancestry
+r1 <- .5; r2 <- .18; r3 <- .2; r4 <- .02; r5 <- .1
+ancTwins <- rep(c(1:5), c(nTwins*r1/2, nTwins*r2/2, nTwins*r3/2, nTwins*r4/2, nTwins*r5/2))
+ancTwins <- rep(ancTwins, 2) 
+ancSibUnrel <- rep(c(1:5), c((n-nTwins)*r1, (n-nTwins)*r2, (n-nTwins)*r3, (n-nTwins)*r4, (n-nTwins)*r5))
+ancAll <- c(ancTwins, ancSibUnrel)
+race <- ancAll
+
+# bind the dataframes, matrices and vectors 
+dat <- data.frame(cbind(IID, FID, mh, df, relp, srelp, srelq, site, age, sex, race))
+nda18 <- dat
+# nda18c <- dat
+# nda18s <- readRDS("teMRIptsd_WholeBrain_Subcortical_data.Rds") 
 # nda18c <- readRDS("teMRIptsd_WholeBrain_Cortical_data.Rds")
 
 # select sMRI volume variables on indirect path
-medVars <- grep(c("subcorticalgrayvolume|cerebellum_cortex_lh|cerebral_white_matter_lh|caudate_rh|caudate_lh|lateral_ventricle_rh"), medVars, value = TRUE)
+medVarsS <- grep(c("subcort"), names(nda18), value = TRUE) # select variables randomly (can also select manually those based on EN-regularization run)
+medVarsS <- sample(medVarsS, 3, replace = FALSE)
+medVarsC <- grep(c("cort"), names(nda18), value = TRUE) # select variables randomly (can also select manually those based on EN-regularization run)
+medVarsC <- sample(medVarsC, 5, replace = FALSE)
+medVars <- c(medVarsS, medVarsC)
 medVars
 
-predictor <- "rte"
-outcome <- "rptsd_noTEna"
-selVars <- c(  "rte", medVars, "rptsd_noTEna" )
-
-# get variables with common names
-# commonNames_nda18 <- intersect(names(nda18s), names(nda18c))
-# bring the cortical variables into the subcortical dataset by IID
-if (length(medVars_cort) > 0) {
-nda18 <- merge(nda18s, nda18c[,c("IID", medVars_cort)], by = "IID")
-} else {
-  nda18 <- nda18s
-}
+predictor <- "mh1"
+outcome <- "mh2"
+selVars <- c(  predictor, medVars, outcome )
+selVars
 
 rmuse <- selVars
 rmuse

@@ -21,7 +21,7 @@ library(mxregsem)
 
 source("miFunctions.R")
 #source("miTryHard.R")
-mxOption( NULL, "Default optimizer", "SLSQP" )
+mxOption( NULL, "Default optimizer", "NPSOL" ) # optimizer options CSOLNP, NPSOL and SLSQP
 mxOption(NULL, 'Number of Threads', parallel::detectCores())
 options(width=280)
 options(max.print=999999)
